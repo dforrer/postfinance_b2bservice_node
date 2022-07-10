@@ -1,0 +1,12 @@
+{
+    "pf_eBillAccountID": "pid",
+    "pf_user": "yb-username",
+    "pf_pw": "password",
+    "pf_cert_path": "",
+    "pf_cert_reject_unauthorized": true,
+    "pf_url": "https://ebill-ki.postfinance.ch/B2BService/B2BService.svc",
+    "write_ws_response": true,
+    "dir_logs": "./logs",
+    "dir_lists": "./pf_lists",
+    "dir_downloads": "./pf_downloads"
+}
