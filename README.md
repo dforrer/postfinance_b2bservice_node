@@ -1,9 +1,9 @@
 DOCUMENTATION
 =============
 Information about the Postfinance webservice:
-[https:www.postfinance.ch/content/dam/pfch/doc/460_479/460_109_en.pdf](https:www.postfinance.ch/content/dam/pfch/doc/460_479/460_109_en.pdf)
+[https://www.postfinance.ch/content/dam/pfch/doc/460_479/460_109_en.pdf](https://www.postfinance.ch/content/dam/pfch/doc/460_479/460_109_en.pdf)
 
-**WSDL**: [https:ebill-ki.postfinance.ch/B2BService/B2BService.svc?singleWsdl](https:ebill-ki.postfinance.ch/B2BService/B2BService.svc?singleWsdl)
+**WSDL**: [https://ebill-ki.postfinance.ch/B2BService/B2BService.svc?singleWsdl](https://ebill-ki.postfinance.ch/B2BService/B2BService.svc?singleWsdl)
 
 Requirements/Setup
 -------------------
