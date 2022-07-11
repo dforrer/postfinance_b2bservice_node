@@ -1,46 +1,44 @@
-var request = require('request');
+const https = require('https');
 
 /**
- * Generic function that makes the POST-request based on the input
- * in the object 'ctx'. The 'callback' is invoked when the
- * request finishes.
+ * Generic https-request with options and a callback function
+ * @param url           String
+ * @param options       JS object
+ * @param request       String
+ * @param callback      JS function
+ * @return (nothing)
  */
-function post_soap_request( ctx, callback ) {
+function post_request( url, options, request, callback ) {
+    const req = https.request(url, options, res => {
+        res.setEncoding('utf8');
+        let body = '';
+        res.on('data', chunk => {
+            body += chunk;
+        });
+        res.on('end', d => {
+            res.response = body;
+            callback(res);
+        });
+    });
 
-	const options = { url: ctx.url
-		, body: ctx.request
-		, headers: { "SOAPAction": ctx.action
-				   , "Content-Type": ctx.contentType
-				   , "MIME-Version": "1.0"
-				   , "Authorization": ctx.authorization
-				   }
-		, encoding: null
-		, rejectUnauthorized: ctx.rejectUnauthorized
-		, agentOptions: ctx.agentOptions
-		, cert: ctx.cert
-		, key: ctx.key
-        , ca: ctx.ca
-		, timeout: 45000
-	};
+    req.on('error', error => {
+        let res = {
+            error: error
+        };
+        callback(res);
+    });
 
-	request.post( options ,
-		function (error, response, body) {
-			ctx.response = body
-			if (response) {
-				ctx.resp_headers = response.headers
-				ctx.resp_contentType = response.headers["content-type"]
-			}
-			if (error) {
-				ctx.error = error
-				callback( ctx );
-			} else {
-				ctx.statusCode = response.statusCode
-				callback( ctx );
-			}
-		}
-	)
+    req.on('timeout', () => {
+        req.destroy();
+        let res = {
+            error: 'HTTPS-Connection timed out.'
+        };
+        callback(res);
+    });
+
+    req.write(request);
+    req.end();
 }
-
 
 /**
  * This function calls the 'GetInvoiceListPayer' method of the webservice.
@@ -78,16 +76,19 @@ exports.pf_getInvoiceListPayer = function (username, pw, nonce, timestamp, ebill
 							'</soap:Body>' +
 						'</soap:Envelope>';
 
-	var ctx = { request: soap_request
-			  , contentType: 'application/soap+xml;charset=UTF-8;action="http://ch.swisspost.ebill.b2bservice/B2BService/GetInvoiceListPayer"'
-			  , url: soap_url
-			  , action: "http://ch.swisspost.ebill.b2bservice/B2BService/GetInvoiceListPayer"
-			  , authorization: ""
-              , rejectUnauthorized: reject_unauthorized
-              , cert: cert
-			  }
+    const options = {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/soap+xml;charset=UTF-8;action="http://ch.swisspost.ebill.b2bservice/B2BService/GetInvoiceListPayer"',
+            'Content-Length': Buffer.byteLength(soap_request),
+            'SOAPAction': 'http://ch.swisspost.ebill.b2bservice/B2BService/GetInvoiceListPayer'
+        },
+        cert: cert,
+        rejectUnauthorized: reject_unauthorized,
+        timeout: 30000
+    };
 
-	post_soap_request( ctx, callback );
+    post_request(soap_url, options, soap_request, callback);
 }
 
 /**
@@ -130,14 +131,17 @@ exports.pf_getInvoicePayer = function (username, pw, nonce, timestamp, ebill_acc
 							'</soap:Body>' +
 						'</soap:Envelope>';
 
-	var ctx = { request: soap_request
-			  , contentType: 'application/soap+xml;charset=UTF-8;action="http://ch.swisspost.ebill.b2bservice/B2BService/GetInvoicePayer"'
-			  , url: soap_url
-			  , action: "http://ch.swisspost.ebill.b2bservice/B2BService/GetInvoicePayer"
-			  , authorization: ""
-              , rejectUnauthorized: reject_unauthorized
-              , cert: cert
-			  }
+    const options = {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/soap+xml;charset=UTF-8;action="http://ch.swisspost.ebill.b2bservice/B2BService/GetInvoicePayer"',
+            'Content-Length': Buffer.byteLength(soap_request),
+            'SOAPAction': 'http://ch.swisspost.ebill.b2bservice/B2BService/GetInvoicePayer'
+        },
+        cert: cert,
+        rejectUnauthorized: reject_unauthorized,
+        timeout: 30000
+    };
 
-	post_soap_request( ctx, callback );
+    post_request(soap_url, options, soap_request, callback);
 }

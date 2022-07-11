@@ -128,7 +128,7 @@ function getInvoiceListPayer(user, pw, ebill_account_id, archive_data) {
     pf_ws.pf_getInvoiceListPayer(user, pw, nonce, timestamp, ebill_account_id, archive_data, config['pf_url'], config['pf_cert_reject_unauthorized'], pf_cert,
         function(ctx) {
             if (ctx.error) {
-                console.log('ERROR: Beim SOAP Request zum Webservice ist etwas schief gegangen. ' + ctx.error);
+                console.log('ERROR: SOAP Request failed. ' + ctx.error);
             } else {
                 if (config['write_ws_response']) {
                     // Write XML to local file
