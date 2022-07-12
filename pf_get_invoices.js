@@ -141,7 +141,7 @@ function getInvoiceListPayer(user, pw, ebill_account_id, archive_data) {
                         }
                     });
                 }
-                parseInvoiceListPayer(ctx.response); // ===> NEXT SYNC step
+                parseInvoiceListPayer(ctx.response); // ===> NEXT STEP
             }
         }
     );
@@ -149,22 +149,26 @@ function getInvoiceListPayer(user, pw, ebill_account_id, archive_data) {
 
 function parseInvoiceListPayer(invoiceListPayerResponse) {
     log( 2, 'INFO: parseInvoiceListPayer');
-    // Inhalt aus der Antwort des Webservice extrahieren
     parseString(invoiceListPayerResponse, function(err, result) {
         const invoiceReports = result['s:Envelope']['s:Body'][0]['GetInvoiceListPayerResponse'][0]['GetInvoiceListPayerResult'][0]['b:InvoiceReport'];
         for (var i = 0 ; i< invoiceReports.length ; i++ ) {
-            // Neues shipment-Objekt
             var invoice = {
                 BillerID: invoiceReports[i]['b:BillerID'][0],
                 TransactionID: invoiceReports[i]['b:TransactionID'][0],
                 DeliveryDate: invoiceReports[i]['b:DeliveryDate'][0],
                 FileType: invoiceReports[i]['b:FileType'][0]
             };
-            // Temporarily filter to one shipmentid
-            invoices.push( invoice );
+            // only add invoice to invoices array if it has a DeliveryDate older than x days
+            var days = 1000*60*60*24;
+            var today = new Date();
+            var deliver_date = new Date(invoice.DeliveryDate);
+            var diff_date = Math.round((today - deliver_date)/days);
+            if (diff_date >= config['delivery_date_offset']) {
+                invoices.push( invoice );
+            }
         }
         console.log(invoices);
-        processNextInvoice(invoices); // ===> NEXT SYNC STEP
+        processNextInvoice(invoices); // ===> NEXT STEP
     });
 }
 
@@ -225,7 +229,7 @@ function getInvoicePayer(user, pw, ebill_account_id, biller_id, transaction_id, 
                         console.log('ERROR: Parsing response: ' + err);
                         return;
                     }
-                    processNextInvoice(invoices); // ===> NEXT SYNC STEP
+                    processNextInvoice(invoices); // ===> NEXT STEP
                 });
             }
         }

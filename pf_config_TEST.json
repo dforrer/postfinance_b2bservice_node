@@ -6,6 +6,7 @@
     "pf_cert_reject_unauthorized": true,
     "pf_url": "https://ebill-ki.postfinance.ch/B2BService/B2BService.svc",
     "write_ws_response": true,
+    "delivery_date_offset": 3,
     "dir_logs": "./logs",
     "dir_lists": "./pf_lists",
     "dir_downloads": "./pf_downloads"
