@@ -158,12 +158,12 @@ function parseInvoiceListPayer(invoiceListPayerResponse) {
                 DeliveryDate: invoiceReports[i]['b:DeliveryDate'][0],
                 FileType: invoiceReports[i]['b:FileType'][0]
             };
-            // only add invoice to invoices array if it has a DeliveryDate older than x days
-            var days = 1000*60*60*24;
+            // only add invoice to invoices array if it has a DeliveryDate older than x hours
+            var hours = 1000*60*60;
             var today = new Date();
-            var deliver_date = new Date(invoice.DeliveryDate);
-            var diff_date = Math.round((today - deliver_date)/days);
-            if (diff_date >= config['delivery_date_offset']) {
+            var delivery_date = new Date(invoice.DeliveryDate);
+            var diff_hours = Math.round((today - delivery_date)/hours);
+            if (diff_hours >= config['delivery_date_delay_in_hours']) {
                 invoices.push( invoice );
             }
         }
