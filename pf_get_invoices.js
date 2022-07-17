@@ -22,7 +22,8 @@
 // Program sequence overview
 // --------------------------
 // - Download the list of new invoices from the Postfinance webservice
-// - Download the XML and PDF file for every TransactionID, BillerID, FileType
+// - Download the RGXMLSIG file for every TransactionID, BillerID
+//   (RGXMLSIG contains all the relevant files XML, PDF, SIG)
 //
 // Function invocation
 // --------------------
@@ -32,6 +33,8 @@
 // 3. processNextInvoice(): While Array 'invoices' has entries
 // 4. getInvoicePayer(): While Array 'invoices' has entries
 // 4.1. pf_getInvoicePayer(): While Array 'invoices' has entries
+// 5. parseInvoicePayerResponse(): While Array 'invoices' has entries
+// 6. parsePayerResult(): While Array 'invoices' has entries
 //*****************************************************************************
 
 //*****************************************************************************
@@ -40,7 +43,8 @@
 const fs = require('fs');
 const util = require('util');
 const crypto = require('crypto');
-const parseString = require('xml2js').parseString;
+const xml2js = require('xml2js');
+const parseString = xml2js.parseString;
 
 //*****************************************************************************
 // Load custom modules
@@ -81,7 +85,7 @@ console.log = function(d) {
     log_stdout.write(logStr);
 };
 
-let num_steps = 4; // Total number of steps for log()
+let num_steps = 6; // Total number of steps for log()
 
 log = function(step, d) {
     let logStr = step + '/' + num_steps + ' ' + util.format(d);
@@ -108,24 +112,36 @@ let handle_error = function(err) {
     }
 }
 
+// Load biller_id list mappings
+let biller_id_list = {};
+if (config['convert_biller_id'] == true) {
+    // Load semicolon separated CSV-file 'biller_id_list.csv'
+    let csv = fs.readFileSync(config['biller_id_mapping_path'], 'utf8');
+    csv = csv.split('\r\n');
+    for (let i = 0; i < csv.length; i++) {
+        csv[i] = csv[i].split(';');
+        biller_id_list[csv[i][0]] = csv[i][1];
+    }
+}
+
 // Array of InvoiceReport-objects to keep track of invoices to download
 let invoices = [];
 
-let archive_data = true; // true = Already downloaded data, false = Never downloaded data
+let archive_data = config['pf_archive_data']; // true = Already downloaded data, false = Never downloaded data
 
 // Start the download process by downloading a list of all available invoices
-getInvoiceListPayer(config['pf_user'], config['pf_pw'], config['pf_eBillAccountID'], archive_data);
+getInvoiceListPayer(archive_data);
 
 //*****************************************************************************
 // Call webservice methode getInvoiceListPayer => Response BillerIDs, TransactionIDs, FileTypes
 //*****************************************************************************
-function getInvoiceListPayer(user, pw, ebill_account_id, archive_data) {
+function getInvoiceListPayer(archive_data) {
     log(1, 'INFO: getInvoiceListPayer');
 
     let nonce = crypto.randomBytes(16).toString('base64');
     let timestamp = new Date().toISOString();
 
-    pf_ws.pf_getInvoiceListPayer(user, pw, nonce, timestamp, ebill_account_id, archive_data, config['pf_url'], config['pf_cert_reject_unauthorized'], pf_cert,
+    pf_ws.pf_getInvoiceListPayer(config['pf_user'], config['pf_pw'], nonce, timestamp, config['pf_eBillAccountID'], archive_data, config['pf_url'], config['pf_cert_reject_unauthorized'], pf_cert,
         function(ctx) {
             if (ctx.error) {
                 console.log('ERROR: SOAP Request failed. ' + ctx.error);
@@ -158,17 +174,21 @@ function parseInvoiceListPayer(invoiceListPayerResponse) {
                 DeliveryDate: invoiceReports[i]['b:DeliveryDate'][0],
                 FileType: invoiceReports[i]['b:FileType'][0]
             };
-            // only add invoice to invoices array if it has a DeliveryDate older than x hours
-            var hours = 1000*60*60;
-            var today = new Date();
-            var delivery_date = new Date(invoice.DeliveryDate);
-            var diff_hours = Math.round((today - delivery_date)/hours);
-            if (diff_hours >= config['delivery_date_delay_in_hours']) {
-                invoices.push( invoice );
+            invoice.FileName = invoice.BillerID + '_' + invoice.TransactionID;
+            // RGXMLSIG is the only FileType we need to download because it contains all the relevant data
+            if (invoice.FileType === 'RGXMLSIG') {
+                // only add invoice to invoices array if it has a DeliveryDate older than x hours
+                var hours = 1000*60*60;
+                var today = new Date();
+                var delivery_date = new Date(invoice.DeliveryDate);
+                var diff_hours = Math.round((today - delivery_date)/hours);
+                if (diff_hours >= config['delivery_date_delay_in_hours']) {
+                    invoices.push( invoice );
+                }
             }
         }
         console.log(invoices);
-        processNextInvoice(invoices); // ===> NEXT STEP
+        processNextInvoice(); // ===> NEXT STEP
     });
 }
 
@@ -176,28 +196,31 @@ function parseInvoiceListPayer(invoiceListPayerResponse) {
 // By calling processNextInvoice() repeatedly we process all the available invoices
 // serially thus avoiding overwhelming the server.
 //*****************************************************************************
-function processNextInvoice( invoices ) {
+function processNextInvoice() {
     log( 3, 'INFO: processNextInvoice');
     // If the invoices-array is empty we are done.
     if (invoices.length == 0) {
         return;  // Nothing to do
     }
 
-    var nextInvoice = invoices.shift();
-
-    getInvoicePayer(config['pf_user'], config['pf_pw'], config['pf_eBillAccountID'], nextInvoice.BillerID, nextInvoice.TransactionID, nextInvoice.FileType);
+    let invoice = invoices.shift();
+    let invoice_dir = config['dir_downloads'] + '/' + invoice.FileName;
+    if ( !fs.existsSync(invoice_dir) ) {
+        fs.mkdirSync(invoice_dir);
+    }
+    getInvoicePayer(invoice);
 }
 
 //*****************************************************************************
 // Call webservice methode getInvoicePayer => File: XML, PDF, (ZIP)
 //*****************************************************************************
-function getInvoicePayer(user, pw, ebill_account_id, biller_id, transaction_id, file_type) {
-    log(4, 'INFO: getInvoicePayer: ' + biller_id + ', ' + transaction_id + ', ' + file_type);
+function getInvoicePayer(invoice) {
+    log(4, 'INFO: getInvoicePayer: ' + invoice.BillerID + ', ' + invoice.TransactionID + ', ' + invoice.FileType);
 
     let nonce = crypto.randomBytes(16).toString('base64');
     let timestamp = new Date().toISOString();
 
-    pf_ws.pf_getInvoicePayer(user, pw, nonce, timestamp, ebill_account_id, biller_id, transaction_id, file_type, config['pf_url'], config['pf_cert_reject_unauthorized'], pf_cert,
+    pf_ws.pf_getInvoicePayer(config['pf_user'], config['pf_pw'], nonce, timestamp, config['pf_eBillAccountID'], invoice.BillerID, invoice.TransactionID, invoice.FileType, config['pf_url'], config['pf_cert_reject_unauthorized'], pf_cert,
         function(ctx) {
             if (ctx.error) {
                 console.log('ERROR: SOAP Request failed. ' + ctx.error);
@@ -212,26 +235,86 @@ function getInvoicePayer(user, pw, ebill_account_id, biller_id, transaction_id, 
                         }
                     });
                 }
-                //file written successfully
-                parseString(ctx.response, function(err, result) {
-                    // Extract content from webservice response
-                    try {
-                        const data = result['s:Envelope']['s:Body'][0]['GetInvoicePayerResponse'][0]['GetInvoicePayerResult'][0]['b:Data'][0];
-                        const filename = result['s:Envelope']['s:Body'][0]['GetInvoicePayerResponse'][0]['GetInvoicePayerResult'][0]['b:Filename'][0];
-                        // Write the file to disk
-                        fs.writeFile(config['dir_downloads'] + '/' + filename, data, { encoding: 'base64' }, err => {
-                            if (err) {
-                                console.error(err);
-                                return;
-                            }
-                        });
-                    } catch (err) {
-                        console.log('ERROR: Parsing response: ' + err);
-                        return;
-                    }
-                    processNextInvoice(invoices); // ===> NEXT STEP
-                });
+                invoice.invoicePayerResponse = ctx.response;
+                parseInvoicePayerResponse(invoice); // ===> NEXT STEP
             }
         }
     );
+}
+
+function parseInvoicePayerResponse(invoice) {
+    log( 5, 'INFO: parseInvoicePayerResponse');
+    parseString(invoice.invoicePayerResponse, function(err, result) {
+        if (err) {
+            console.error(err);
+            return;
+        }
+        // Extract content from webservice response (requires RGXMLSIG)
+        invoice.invoicePayerResultBase64 = result['s:Envelope']['s:Body'][0]['GetInvoicePayerResponse'][0]['GetInvoicePayerResult'][0]['b:Data'][0];
+        //const filename = result['s:Envelope']['s:Body'][0]['GetInvoicePayerResponse'][0]['GetInvoicePayerResult'][0]['b:Filename'][0];
+        fs.writeFile(config['dir_downloads'] + '/' + invoice.FileName + '/RGXMLSIG_' + invoice.FileName + '.xml', invoice.invoicePayerResultBase64, { encoding: 'base64' }, err => {
+            if (err) {
+                console.error(err);
+                return;
+            }
+        });
+        // Convert invoice.invoicePayerResultBase64 to utf8
+        invoice.invoicePayerResultUTF8 = Buffer.from( invoice.invoicePayerResultBase64, 'base64').toString('utf8');
+        parsePayerResult(invoice); //===> NEXT STEP
+    });
+}
+
+function parsePayerResult(invoice) {
+    log( 6, 'INFO: parsePayerResult');
+    parseString(invoice.invoicePayerResultUTF8, function (err, result) {
+        if (err) {
+            console.error(err);
+            return;
+        }
+        let res_objects = result['Signature']['Object'];
+        for (let i = 0; i < res_objects.length ; i++) {
+            if (res_objects[i]['$']['Id'] == 'RGXml') {
+                //console.log(JSON.stringify(res_objects[i]));
+                const builder = new xml2js.Builder({
+                   headless: true,
+                   allowSurrogateChars: true,
+                   rootName: 'Envelope',
+                   cdata: false
+                });
+                var xml = builder.buildObject(res_objects[i]['Envelope'][0]).toString();
+                if (config['convert_biller_id'] == true) {
+                    if (biller_id_list[invoice.BillerID] !== undefined) {
+                        xml = xml.replace('<BillerID>' + invoice.BillerID + '</BillerID>', '<BillerID>' + biller_id_list[invoice.BillerID] + '</BillerID>');
+                    }
+                }
+                fs.writeFile(config['dir_downloads'] + '/' + invoice.FileName + '/' + invoice.FileName + '.xml', xml, err => {
+                    if (err) {
+                        console.error(err);
+                        return;
+                    }
+                });
+                // save Appendix
+                if (res_objects[i]['Envelope'][0]['Body'][0]['Appendix']) {
+                    let app = res_objects[i]['Envelope'][0]['Body'][0]['Appendix'][0]['Document'][0]['_'];
+                    //console.log(app);
+                    let appendix_filename = res_objects[i]['Envelope'][0]['Body'][0]['Appendix'][0]['Document'][0]['$']['FileName'];
+                    fs.writeFile(config['dir_downloads'] + '/' + invoice.FileName + '/Appendix_' + appendix_filename, app, { encoding: 'base64' }, err => {
+                        if (err) {
+                            console.error(err);
+                            return;
+                        }
+                    });
+                }
+            }
+            if (res_objects[i]['$']['Id'] == 'PDFInvoice') {
+                fs.writeFile(config['dir_downloads'] + '/' + invoice.FileName + '/' + invoice.FileName + '.pdf', res_objects[i]['_'], { encoding: 'base64' }, err => {
+                    if (err) {
+                        console.error(err);
+                        return;
+                    }
+                });
+            }
+        }
+    });
+    processNextInvoice(); // ===> NEXT STEP
 }

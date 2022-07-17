@@ -5,8 +5,11 @@
     "pf_cert_path": "",
     "pf_cert_reject_unauthorized": true,
     "pf_url": "https://ebill-ki.postfinance.ch/B2BService/B2BService.svc",
-    "write_ws_response": true,
-    "delivery_date_delay_in_hours": 48,
+    "pf_archive_data": true,
+    "write_ws_response": false,
+    "delivery_date_delay_in_hours": 360,
+    "convert_biller_id": true,
+    "biller_id_mapping_path": "biller_id_list.csv",
     "dir_logs": "./logs",
     "dir_lists": "./pf_lists",
     "dir_downloads": "./pf_downloads"
