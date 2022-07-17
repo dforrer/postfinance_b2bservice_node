@@ -54,25 +54,25 @@ const pf_ws = require('./pf_webservices.js')
 //*****************************************************************************
 // Open application specific configuration and mappings
 //*****************************************************************************
-global.config = require('./pf_config_TEST.json')
+global.CONFIG = require('./pf_config_TEST.json')
 
 //*****************************************************************************
 // Create directories if they don't exist already
 //*****************************************************************************
-if (!fs.existsSync(config['dir_logs'])) {
-    fs.mkdirSync(config['dir_logs']);
+if (!fs.existsSync(CONFIG.dir_logs)) {
+    fs.mkdirSync(CONFIG.dir_logs);
 }
-if (!fs.existsSync(config['dir_lists'])) {
-    fs.mkdirSync(config['dir_lists']);
+if (!fs.existsSync(CONFIG.dir_lists)) {
+    fs.mkdirSync(CONFIG.dir_lists);
 }
-if (!fs.existsSync(config['dir_downloads'])) {
-    fs.mkdirSync(config['dir_downloads']);
+if (!fs.existsSync(CONFIG.dir_downloads)) {
+    fs.mkdirSync(CONFIG.dir_downloads);
 }
 
 //*****************************************************************************
 // Override console.log
 //*****************************************************************************
-const log_name = config['dir_logs'] + '/debug_' + new Date().toISOString().slice(0, 10) + '.log';
+const log_name = CONFIG.dir_logs + '/debug_' + new Date().toISOString().slice(0, 10) + '.log';
 let log_file = fs.createWriteStream(log_name, {
     flags: 'a'
 });
@@ -98,7 +98,7 @@ log = function(step, d) {
 process.env["NODE_TLS_REJECT_UNAUTHORIZED"] = 1; // only allow authorized SSL/TLS connections
 let pf_cert = null;
 // try {
-//     pf_cert = fs.readFileSync( config[ 'pf_cert_path' ] , "utf8" );
+//     pf_cert = fs.readFileSync( CONFIG.pf_cert_path , "utf8" );
 // } catch ( e ) {
 //     console.log( e );
 // }
@@ -114,9 +114,9 @@ let handle_error = function(err) {
 
 // Load biller_id list mappings
 let biller_id_list = {};
-if (config['convert_biller_id'] == true) {
+if (CONFIG.convert_biller_id == true) {
     // Load semicolon separated CSV-file 'biller_id_list.csv'
-    let csv = fs.readFileSync(config['biller_id_mapping_path'], 'utf8');
+    let csv = fs.readFileSync(CONFIG.biller_id_mapping_path, 'utf8');
     csv = csv.split('\r\n');
     for (let i = 0; i < csv.length; i++) {
         csv[i] = csv[i].split(';');
@@ -127,7 +127,7 @@ if (config['convert_biller_id'] == true) {
 // Array of InvoiceReport-objects to keep track of invoices to download
 let invoices = [];
 
-let archive_data = config['pf_archive_data']; // true = Already downloaded data, false = Never downloaded data
+let archive_data = CONFIG.pf_archive_data; // true = Already downloaded data, false = Never downloaded data
 
 // Start the download process by downloading a list of all available invoices
 getInvoiceListPayer(archive_data);
@@ -141,14 +141,14 @@ function getInvoiceListPayer(archive_data) {
     let nonce = crypto.randomBytes(16).toString('base64');
     let timestamp = new Date().toISOString();
 
-    pf_ws.pf_getInvoiceListPayer(config['pf_user'], config['pf_pw'], nonce, timestamp, config['pf_eBillAccountID'], archive_data, config['pf_url'], config['pf_cert_reject_unauthorized'], pf_cert,
+    pf_ws.pf_getInvoiceListPayer(CONFIG.pf_user, CONFIG.pf_pw, nonce, timestamp, CONFIG.pf_eBillAccountID, archive_data, CONFIG.pf_url, CONFIG.pf_cert_reject_unauthorized, pf_cert,
         function(ctx) {
             if (ctx.error) {
                 console.log('ERROR: SOAP Request failed. ' + ctx.error);
             } else {
-                if (config['write_ws_response']) {
+                if (CONFIG.write_ws_response) {
                     // Write XML to local file
-                    const output_filename = config['dir_lists'] + '/ws_response_InvoiceListPayer_' +
+                    const output_filename = CONFIG.dir_lists + '/ws_response_InvoiceListPayer_' +
                         new Date().toISOString().slice(0, 19).replace(/:/g, "-") + '.xml';
                     fs.writeFile(output_filename, ctx.response, err => {
                         if (err) {
@@ -182,7 +182,7 @@ function parseInvoiceListPayer(invoiceListPayerResponse) {
                 var today = new Date();
                 var delivery_date = new Date(invoice.DeliveryDate);
                 var diff_hours = Math.round((today - delivery_date)/hours);
-                if (diff_hours >= config['delivery_date_delay_in_hours']) {
+                if (diff_hours >= CONFIG.delivery_date_delay_in_hours) {
                     invoices.push( invoice );
                 }
             }
@@ -204,7 +204,7 @@ function processNextInvoice() {
     }
 
     let invoice = invoices.shift();
-    let invoice_dir = config['dir_downloads'] + '/' + invoice.FileName;
+    let invoice_dir = CONFIG.dir_downloads + '/' + invoice.FileName;
     if ( !fs.existsSync(invoice_dir) ) {
         fs.mkdirSync(invoice_dir);
     }
@@ -220,14 +220,14 @@ function getInvoicePayer(invoice) {
     let nonce = crypto.randomBytes(16).toString('base64');
     let timestamp = new Date().toISOString();
 
-    pf_ws.pf_getInvoicePayer(config['pf_user'], config['pf_pw'], nonce, timestamp, config['pf_eBillAccountID'], invoice.BillerID, invoice.TransactionID, invoice.FileType, config['pf_url'], config['pf_cert_reject_unauthorized'], pf_cert,
+    pf_ws.pf_getInvoicePayer(CONFIG.pf_user, CONFIG.pf_pw, nonce, timestamp, CONFIG.pf_eBillAccountID, invoice.BillerID, invoice.TransactionID, invoice.FileType, CONFIG.pf_url, CONFIG.pf_cert_reject_unauthorized, pf_cert,
         function(ctx) {
             if (ctx.error) {
                 console.log('ERROR: SOAP Request failed. ' + ctx.error);
             } else {
-                if (config['write_ws_response']) {
+                if (CONFIG.write_ws_response) {
                     // Write response XML to local file
-                    const output_filename = config['dir_downloads'] + '/ws_response_InvoicePayer_' + biller_id + '_' + transaction_id + '_' + file_type + '.XML';
+                    const output_filename = CONFIG.dir_downloads + '/ws_response_InvoicePayer_' + biller_id + '_' + transaction_id + '_' + file_type + '.XML';
                     fs.writeFile(output_filename, ctx.response, err => {
                         if (err) {
                             console.error(err);
@@ -252,7 +252,7 @@ function parseInvoicePayerResponse(invoice) {
         // Extract content from webservice response (requires RGXMLSIG)
         invoice.invoicePayerResultBase64 = result['s:Envelope']['s:Body'][0]['GetInvoicePayerResponse'][0]['GetInvoicePayerResult'][0]['b:Data'][0];
         //const filename = result['s:Envelope']['s:Body'][0]['GetInvoicePayerResponse'][0]['GetInvoicePayerResult'][0]['b:Filename'][0];
-        fs.writeFile(config['dir_downloads'] + '/' + invoice.FileName + '/RGXMLSIG_' + invoice.FileName + '.xml', invoice.invoicePayerResultBase64, { encoding: 'base64' }, err => {
+        fs.writeFile(CONFIG.dir_downloads + '/' + invoice.FileName + '/RGXMLSIG_' + invoice.FileName + '.xml', invoice.invoicePayerResultBase64, { encoding: 'base64' }, err => {
             if (err) {
                 console.error(err);
                 return;
@@ -282,12 +282,12 @@ function parsePayerResult(invoice) {
                    cdata: false
                 });
                 var xml = builder.buildObject(res_objects[i]['Envelope'][0]).toString();
-                if (config['convert_biller_id'] == true) {
+                if (CONFIG.convert_biller_id == true) {
                     if (biller_id_list[invoice.BillerID] !== undefined) {
                         xml = xml.replace('<BillerID>' + invoice.BillerID + '</BillerID>', '<BillerID>' + biller_id_list[invoice.BillerID] + '</BillerID>');
                     }
                 }
-                fs.writeFile(config['dir_downloads'] + '/' + invoice.FileName + '/' + invoice.FileName + '.xml', xml, err => {
+                fs.writeFile(CONFIG.dir_downloads + '/' + invoice.FileName + '/' + invoice.FileName + '.xml', xml, err => {
                     if (err) {
                         console.error(err);
                         return;
@@ -298,7 +298,7 @@ function parsePayerResult(invoice) {
                     let app = res_objects[i]['Envelope'][0]['Body'][0]['Appendix'][0]['Document'][0]['_'];
                     //console.log(app);
                     let appendix_filename = res_objects[i]['Envelope'][0]['Body'][0]['Appendix'][0]['Document'][0]['$']['FileName'];
-                    fs.writeFile(config['dir_downloads'] + '/' + invoice.FileName + '/Appendix_' + appendix_filename, app, { encoding: 'base64' }, err => {
+                    fs.writeFile(CONFIG.dir_downloads + '/' + invoice.FileName + '/Appendix_' + appendix_filename, app, { encoding: 'base64' }, err => {
                         if (err) {
                             console.error(err);
                             return;
@@ -307,7 +307,7 @@ function parsePayerResult(invoice) {
                 }
             }
             if (res_objects[i]['$']['Id'] == 'PDFInvoice') {
-                fs.writeFile(config['dir_downloads'] + '/' + invoice.FileName + '/' + invoice.FileName + '.pdf', res_objects[i]['_'], { encoding: 'base64' }, err => {
+                fs.writeFile(CONFIG.dir_downloads + '/' + invoice.FileName + '/' + invoice.FileName + '.pdf', res_objects[i]['_'], { encoding: 'base64' }, err => {
                     if (err) {
                         console.error(err);
                         return;
