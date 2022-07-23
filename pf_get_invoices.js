@@ -205,9 +205,12 @@ function processNextInvoice() {
 
     let invoice = invoices.shift();
     let invoice_dir = CONFIG.dir_downloads + '/' + invoice.FileName;
-    if ( !fs.existsSync(invoice_dir) ) {
-        fs.mkdirSync(invoice_dir);
+    if ( fs.existsSync(invoice_dir) ) {
+        let datetime = new Date().toISOString().replace(/[^a-z0-9]/gi,'').substring(0,15);
+        invoice.FileName = invoice.FileName + '_' + datetime;
+        invoice_dir = CONFIG.dir_downloads + '/' + invoice.FileName;
     }
+    fs.mkdirSync(invoice_dir);
     getInvoicePayer(invoice);
 }
 
