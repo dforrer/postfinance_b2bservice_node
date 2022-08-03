@@ -24,17 +24,16 @@
 // - Download the list of new invoices from the Postfinance webservice
 // - Download the RGXMLSIG file for every TransactionID, BillerID
 //   (RGXMLSIG contains all the relevant files XML, PDF, SIG)
+// - Extract 'PDFInvoice', 'RGXml' (and appendix if present) and save them as separate files
 //
 // Function invocation
 // --------------------
-// 1. getInvoiceListPayer(): 1x
-// 1.1. pf_getInvoiceListPayer(): 1x
-// 2. parseInvoiceListPayer(): 1x
-// 3. processNextInvoice(): While Array 'invoices' has entries
-// 4. getInvoicePayer(): While Array 'invoices' has entries
-// 4.1. pf_getInvoicePayer(): While Array 'invoices' has entries
-// 5. parseInvoicePayerResponse(): While Array 'invoices' has entries
-// 6. parsePayerResult(): While Array 'invoices' has entries
+// 1. downloadInvoices(): MAIN function which controls the application flow
+// 1.1. pf_getInvoiceListPayer()
+// 1.2. parseInvoiceListPayer() => 'invoices' array
+// 1.3. createDir(): While Array 'invoices' has entries
+// 1.4. pf_getInvoicePayer(): While Array 'invoices' has entries
+// 1.5. parseInvoicePayerResponse(): While Array 'invoices' has entries
 //*****************************************************************************
 
 //*****************************************************************************
@@ -42,7 +41,6 @@
 //*****************************************************************************
 const fs = require('fs');
 const util = require('util');
-const crypto = require('crypto');
 const xml2js = require('xml2js');
 const parseString = xml2js.parseString;
 
@@ -85,13 +83,6 @@ console.log = function(d) {
     log_stdout.write(logStr);
 };
 
-let num_steps = 6; // Total number of steps for log()
-
-log = function(step, d) {
-    let logStr = step + '/' + num_steps + ' ' + util.format(d);
-    console.log(logStr);
-};
-
 //*****************************************************************************
 // Define parameters for Webservices
 //*****************************************************************************
@@ -102,15 +93,6 @@ let pf_cert = null;
 // } catch ( e ) {
 //     console.log( e );
 // }
-
-//*****************************************************************************
-// Setup error handling callback function
-//*****************************************************************************
-let handle_error = function(err) {
-    if (err) {
-        console.log(err);
-    }
-}
 
 // Load biller_id list mappings
 let biller_id_list = {};
@@ -124,86 +106,91 @@ if (CONFIG.convert_biller_id == true) {
     }
 }
 
-// Array of InvoiceReport-objects to keep track of invoices to download
-let invoices = [];
+// true = get already downloaded data, false = get never downloaded data
+const archive_data = CONFIG.pf_archive_data;
+// Start the download process
+downloadInvoices(archive_data);
 
-let archive_data = CONFIG.pf_archive_data; // true = Already downloaded data, false = Never downloaded data
-
-// Start the download process by downloading a list of all available invoices
-getInvoiceListPayer(archive_data);
-
-//*****************************************************************************
-// Call webservice methode getInvoiceListPayer => Response BillerIDs, TransactionIDs, FileTypes
-//*****************************************************************************
-function getInvoiceListPayer(archive_data) {
-    log(1, 'INFO: getInvoiceListPayer');
-
-    let nonce = crypto.randomBytes(16).toString('base64');
-    let timestamp = new Date().toISOString();
-
-    pf_ws.pf_getInvoiceListPayer(CONFIG.pf_user, CONFIG.pf_pw, nonce, timestamp, CONFIG.pf_eBillAccountID, archive_data, CONFIG.pf_url, CONFIG.pf_cert_reject_unauthorized, pf_cert,
-        function(ctx) {
-            if (ctx.error) {
-                console.log('ERROR: SOAP Request failed. ' + ctx.error);
-            } else {
-                if (CONFIG.write_ws_response) {
-                    // Write XML to local file
-                    const output_filename = CONFIG.dir_lists + '/ws_response_InvoiceListPayer_' +
-                        new Date().toISOString().slice(0, 19).replace(/:/g, "-") + '.xml';
-                    fs.writeFile(output_filename, ctx.response, err => {
-                        if (err) {
-                            console.error(err);
-                            return;
-                        }
-                    });
-                }
-                parseInvoiceListPayer(ctx.response); // ===> NEXT STEP
-            }
+/**
+ * MAIN function that controls the flow of the application
+ * @param archive_data  boolean (true, false)
+ */
+async function downloadInvoices(archive_data) {
+    console.log('INFO: downloadInvoices');
+    let invoices; // Array of InvoiceReport-objects to keep track of invoices to download
+    try {
+        // waiting for async functions
+        let res = await pf_ws.pf_getInvoiceListPayer(CONFIG.pf_user, CONFIG.pf_pw, CONFIG.pf_eBillAccountID, archive_data, CONFIG.pf_url, CONFIG.pf_cert_reject_unauthorized, pf_cert);
+        invoices = await parseInvoiceListPayer(res.response);
+        if (CONFIG.write_ws_response) {
+            const output_filename = CONFIG.dir_lists + '/ws_response_InvoiceListPayer_' +
+                new Date().toISOString().slice(0, 19).replace(/:/g, "-") + '.xml';
+            await writeFile(output_filename, res.response); // Write XML to local file
         }
-    );
-}
-
-function parseInvoiceListPayer(invoiceListPayerResponse) {
-    log( 2, 'INFO: parseInvoiceListPayer');
-    parseString(invoiceListPayerResponse, function(err, result) {
-        const invoiceReports = result['s:Envelope']['s:Body'][0]['GetInvoiceListPayerResponse'][0]['GetInvoiceListPayerResult'][0]['b:InvoiceReport'];
-        for (var i = 0 ; i< invoiceReports.length ; i++ ) {
-            var invoice = {
-                BillerID: invoiceReports[i]['b:BillerID'][0],
-                TransactionID: invoiceReports[i]['b:TransactionID'][0],
-                DeliveryDate: invoiceReports[i]['b:DeliveryDate'][0],
-                FileType: invoiceReports[i]['b:FileType'][0]
-            };
-            invoice.FileName = invoice.BillerID + '_' + invoice.TransactionID;
-            // RGXMLSIG is the only FileType we need to download because it contains all the relevant data
-            if (invoice.FileType === 'RGXMLSIG') {
-                // only add invoice to invoices array if it has a DeliveryDate older than x hours
-                var hours = 1000*60*60;
-                var today = new Date();
-                var delivery_date = new Date(invoice.DeliveryDate);
-                var diff_hours = Math.round((today - delivery_date)/hours);
-                if (diff_hours >= CONFIG.delivery_date_delay_in_hours) {
-                    invoices.push( invoice );
-                }
-            }
-        }
-        console.log(invoices);
-        processNextInvoice(); // ===> NEXT STEP
-    });
-}
-
-//*****************************************************************************
-// By calling processNextInvoice() repeatedly we process all the available invoices
-// serially thus avoiding overwhelming the server.
-//*****************************************************************************
-function processNextInvoice() {
-    log( 3, 'INFO: processNextInvoice');
-    // If the invoices-array is empty we are done.
-    if (invoices.length == 0) {
-        return;  // Nothing to do
+    } catch (e) {
+        console.error(e);
+        return;
     }
 
-    let invoice = invoices.shift();
+    while (invoices.length > 0) {
+        let invoice = invoices.shift();
+        invoice = createDir(invoice); // this makes it clear that 'invoice' might be changed
+        try {
+            // waiting for async functions
+            let res = await pf_ws.pf_getInvoicePayer(CONFIG.pf_user, CONFIG.pf_pw, CONFIG.pf_eBillAccountID, invoice.BillerID, invoice.TransactionID, invoice.FileType, CONFIG.pf_url, CONFIG.pf_cert_reject_unauthorized, pf_cert);
+            invoice = await parseInvoicePayerResponse(invoice, res.response);
+            if (CONFIG.write_ws_response) {
+                const output_filename = CONFIG.dir_downloads + '/ws_response_InvoicePayer_' + invoice.BillerID + '_' + invoice.TransactionID + '_' + invoice.FileType + '.XML';
+                await writeFile(output_filename, res.response); // Write response XML to local file
+            }
+        } catch (e) {
+            console.error(e);
+            return;
+        }
+    }
+}
+
+/**
+ * Parses the response of pf_getInvoiceListPayer and returns an array of invoices
+ * @param   response    String
+ * @return  invoices    Array
+ */
+async function parseInvoiceListPayer(response) {
+    console.log('INFO: parseInvoiceListPayer');
+    let parsed_res = await parseXML(response);
+    let invoices = [];
+    const invoiceReports = parsed_res['s:Envelope']['s:Body'][0]['GetInvoiceListPayerResponse'][0]['GetInvoiceListPayerResult'][0]['b:InvoiceReport'];
+    for (let i = 0 ; i< invoiceReports.length ; i++ ) {
+        let invoice = {
+            BillerID: invoiceReports[i]['b:BillerID'][0],
+            TransactionID: invoiceReports[i]['b:TransactionID'][0],
+            DeliveryDate: invoiceReports[i]['b:DeliveryDate'][0],
+            FileType: invoiceReports[i]['b:FileType'][0]
+        };
+        invoice.FileName = invoice.BillerID + '_' + invoice.TransactionID;
+        // RGXMLSIG is the only FileType we need to download because it contains all the relevant data
+        if (invoice.FileType === 'RGXMLSIG') {
+            // only add invoice to invoices array if it has a DeliveryDate older than x hours
+            let hours = 1000*60*60;
+            let today = new Date();
+            let delivery_date = new Date(invoice.DeliveryDate);
+            let diff_hours = Math.round((today - delivery_date)/hours);
+            if (diff_hours >= CONFIG.delivery_date_delay_in_hours) {
+                invoices.push( invoice );
+            }
+        }
+    }
+    console.log(invoices);
+    return invoices;
+}
+
+/**
+ * Creates the directory for the 'invoice'-object. If the directory already
+ * exists, the datetime is appended and FileName-attribute is changed.
+ * @param   invoice     JS-object
+ * @return  invoice     JS-object
+ */
+function createDir(invoice) {
     let invoice_dir = CONFIG.dir_downloads + '/' + invoice.FileName;
     if ( fs.existsSync(invoice_dir) ) {
         let datetime = new Date().toISOString().replace(/[^a-z0-9]/gi,'').substring(0,15);
@@ -211,113 +198,94 @@ function processNextInvoice() {
         invoice_dir = CONFIG.dir_downloads + '/' + invoice.FileName;
     }
     fs.mkdirSync(invoice_dir);
-    getInvoicePayer(invoice);
+    return invoice;
 }
 
-//*****************************************************************************
-// Call webservice methode getInvoicePayer => File: XML, PDF, (ZIP)
-//*****************************************************************************
-function getInvoicePayer(invoice) {
-    log(4, 'INFO: getInvoicePayer: ' + invoice.BillerID + ', ' + invoice.TransactionID + ', ' + invoice.FileType);
-
-    let nonce = crypto.randomBytes(16).toString('base64');
-    let timestamp = new Date().toISOString();
-
-    pf_ws.pf_getInvoicePayer(CONFIG.pf_user, CONFIG.pf_pw, nonce, timestamp, CONFIG.pf_eBillAccountID, invoice.BillerID, invoice.TransactionID, invoice.FileType, CONFIG.pf_url, CONFIG.pf_cert_reject_unauthorized, pf_cert,
-        function(ctx) {
-            if (ctx.error) {
-                console.log('ERROR: SOAP Request failed. ' + ctx.error);
-            } else {
-                if (CONFIG.write_ws_response) {
-                    // Write response XML to local file
-                    const output_filename = CONFIG.dir_downloads + '/ws_response_InvoicePayer_' + biller_id + '_' + transaction_id + '_' + file_type + '.XML';
-                    fs.writeFile(output_filename, ctx.response, err => {
-                        if (err) {
-                            console.error(err);
-                            return;
-                        }
-                    });
+/**
+ * Parses the response of pf_getInvoicePayer.
+ * Changes the 'invoice'-object and returns it.
+ * @param   invoice     JS-object
+ * @param   response    String
+ * @return  invoice     JS-object
+ */
+async function parseInvoicePayerResponse(invoice, response) {
+    console.log('INFO: parseInvoicePayerResponse');
+    const parsed_res = await parseXML(response);
+    // Extract content from webservice response (requires RGXMLSIG)
+    invoice.invoicePayerResultBase64 = parsed_res['s:Envelope']['s:Body'][0]['GetInvoicePayerResponse'][0]['GetInvoicePayerResult'][0]['b:Data'][0];
+    await writeFile(CONFIG.dir_downloads + '/' + invoice.FileName + '/RGXMLSIG_' + invoice.FileName + '.xml', invoice.invoicePayerResultBase64, { encoding: 'base64' } );
+    // Convert invoice.invoicePayerResultBase64 to utf8
+    invoice.invoicePayerResultUTF8 = Buffer.from(invoice.invoicePayerResultBase64, 'base64').toString('utf8');
+    const parsedUTF8 = await parseXML(invoice.invoicePayerResultUTF8);
+    const res_objects = parsedUTF8['Signature']['Object'];
+    for (let i = 0; i < res_objects.length ; i++) {
+        switch ( res_objects[i]['$']['Id'] ) {
+        case 'PDFInvoice':
+            await writeFile(CONFIG.dir_downloads + '/' + invoice.FileName + '/' + invoice.FileName + '.pdf', res_objects[i]['_'], { encoding: 'base64' } );
+            break;
+        case 'RGXml':
+            const builder = new xml2js.Builder({
+               headless: true,
+               allowSurrogateChars: true,
+               rootName: 'Envelope',
+               cdata: false
+            });
+            let xml = builder.buildObject(res_objects[i]['Envelope'][0]).toString();
+            if (CONFIG.convert_biller_id == true) {
+                if (biller_id_list[invoice.BillerID] !== undefined) {
+                    xml = xml.replace('<BillerID>' + invoice.BillerID + '</BillerID>', '<BillerID>' + biller_id_list[invoice.BillerID] + '</BillerID>');
                 }
-                invoice.invoicePayerResponse = ctx.response;
-                parseInvoicePayerResponse(invoice); // ===> NEXT STEP
             }
+            await writeFile(CONFIG.dir_downloads + '/' + invoice.FileName + '/' + invoice.FileName + '.xml', xml );
+            // save Appendix
+            if (res_objects[i]['Envelope'][0]['Body'][0]['Appendix']) {
+                const app = res_objects[i]['Envelope'][0]['Body'][0]['Appendix'][0]['Document'][0]['_'];
+                //console.log(app);
+                const appendix_filename = res_objects[i]['Envelope'][0]['Body'][0]['Appendix'][0]['Document'][0]['$']['FileName'];
+                await writeFile(CONFIG.dir_downloads + '/' + invoice.FileName + '/Appendix_' + appendix_filename, app, { encoding: 'base64' } );
+            }
+            break;
+        default:
+            //console.log('type:' + res_objects[i]['$']['Id']);
         }
-    );
+    }
+    return invoice;
 }
 
-function parseInvoicePayerResponse(invoice) {
-    log( 5, 'INFO: parseInvoicePayerResponse');
-    parseString(invoice.invoicePayerResponse, function(err, result) {
-        if (err) {
-            console.error(err);
-            return;
-        }
-        // Extract content from webservice response (requires RGXMLSIG)
-        invoice.invoicePayerResultBase64 = result['s:Envelope']['s:Body'][0]['GetInvoicePayerResponse'][0]['GetInvoicePayerResult'][0]['b:Data'][0];
-        //const filename = result['s:Envelope']['s:Body'][0]['GetInvoicePayerResponse'][0]['GetInvoicePayerResult'][0]['b:Filename'][0];
-        fs.writeFile(CONFIG.dir_downloads + '/' + invoice.FileName + '/RGXMLSIG_' + invoice.FileName + '.xml', invoice.invoicePayerResultBase64, { encoding: 'base64' }, err => {
-            if (err) {
-                console.error(err);
-                return;
+/**
+ * Promisify parseString from xml2js
+ * @param   xml         String
+ * @return  promise     JS-promise
+ */
+async function parseXML(xml) {
+    const promise = await new Promise((resolve, reject) => {
+        parseString(xml, (error, result) => {
+            if (error) {
+                reject(error);
+            } else {
+                resolve(result);
             }
         });
-        // Convert invoice.invoicePayerResultBase64 to utf8
-        invoice.invoicePayerResultUTF8 = Buffer.from( invoice.invoicePayerResultBase64, 'base64').toString('utf8');
-        parsePayerResult(invoice); //===> NEXT STEP
     });
+    return promise;
 }
 
-function parsePayerResult(invoice) {
-    log( 6, 'INFO: parsePayerResult');
-    parseString(invoice.invoicePayerResultUTF8, function (err, result) {
-        if (err) {
-            console.error(err);
-            return;
-        }
-        let res_objects = result['Signature']['Object'];
-        for (let i = 0; i < res_objects.length ; i++) {
-            if (res_objects[i]['$']['Id'] == 'RGXml') {
-                //console.log(JSON.stringify(res_objects[i]));
-                const builder = new xml2js.Builder({
-                   headless: true,
-                   allowSurrogateChars: true,
-                   rootName: 'Envelope',
-                   cdata: false
-                });
-                var xml = builder.buildObject(res_objects[i]['Envelope'][0]).toString();
-                if (CONFIG.convert_biller_id == true) {
-                    if (biller_id_list[invoice.BillerID] !== undefined) {
-                        xml = xml.replace('<BillerID>' + invoice.BillerID + '</BillerID>', '<BillerID>' + biller_id_list[invoice.BillerID] + '</BillerID>');
-                    }
-                }
-                fs.writeFile(CONFIG.dir_downloads + '/' + invoice.FileName + '/' + invoice.FileName + '.xml', xml, err => {
-                    if (err) {
-                        console.error(err);
-                        return;
-                    }
-                });
-                // save Appendix
-                if (res_objects[i]['Envelope'][0]['Body'][0]['Appendix']) {
-                    let app = res_objects[i]['Envelope'][0]['Body'][0]['Appendix'][0]['Document'][0]['_'];
-                    //console.log(app);
-                    let appendix_filename = res_objects[i]['Envelope'][0]['Body'][0]['Appendix'][0]['Document'][0]['$']['FileName'];
-                    fs.writeFile(CONFIG.dir_downloads + '/' + invoice.FileName + '/Appendix_' + appendix_filename, app, { encoding: 'base64' }, err => {
-                        if (err) {
-                            console.error(err);
-                            return;
-                        }
-                    });
-                }
+/**
+ * Promisify fs.writeFile
+ * @param   filename    String
+ * @param   content     data to write
+ * @param   options     JS-object, e.g. { encoding: 'base64' }
+ * @return  promise     JS-promise
+ */
+async function writeFile(filename, content, options) {
+    const promise = await new Promise((resolve, reject) => {
+        fs.writeFile(filename, content, options, err => {
+            if (err) {
+                reject(error);
+            } else {
+                resolve(filename);
             }
-            if (res_objects[i]['$']['Id'] == 'PDFInvoice') {
-                fs.writeFile(CONFIG.dir_downloads + '/' + invoice.FileName + '/' + invoice.FileName + '.pdf', res_objects[i]['_'], { encoding: 'base64' }, err => {
-                    if (err) {
-                        console.error(err);
-                        return;
-                    }
-                });
-            }
-        }
+        });
     });
-    processNextInvoice(); // ===> NEXT STEP
+    return promise;
 }

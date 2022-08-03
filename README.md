@@ -5,6 +5,8 @@ Information about the Postfinance webservice:
 
 **WSDL**: [https://ebill-ki.postfinance.ch/B2BService/B2BService.svc?singleWsdl](https://ebill-ki.postfinance.ch/B2BService/B2BService.svc?singleWsdl)
 
+**Now using async/await and promises instead of callbacks.**
+
 Requirements/Setup
 -------------------
 - Node.js and NPM have to be installed
@@ -21,13 +23,15 @@ Requirements/Setup
 Program sequence overview
 --------------------------
 - Download the list of new invoices from the Postfinance webservice
-- Download the XML and PDF file for every TransactionID, BillerID, FileType
+- Download the RGXMLSIG file for every TransactionID, BillerID (RGXMLSIG contains all the relevant files XML, PDF, SIG)
+- Extract 'PDFInvoice', 'RGXml' (and appendix if present) and save them as separate files
+
 
 Function invocation
 --------------------
-1. getInvoiceListPayer(): 1x
-2. pf_getInvoiceListPayer(): 1x
-3. parseInvoiceListPayer(): 1x
-4. processNextInvoice(): While Array 'invoices' has entries
-5. getInvoicePayer(): While Array 'invoices' has entries
-6. pf_getInvoicePayer(): While Array 'invoices' has entries
+1. downloadInvoices(): MAIN function which controls the application flow
+2. pf_getInvoiceListPayer()
+3. parseInvoiceListPayer() => 'invoices' array
+4. createDir(): While Array 'invoices' has entries
+5. pf_getInvoicePayer(): While Array 'invoices' has entries
+6. parseInvoicePayerResponse(): While Array 'invoices' has entries
