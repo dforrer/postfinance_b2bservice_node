@@ -29,11 +29,11 @@
 // Function invocation
 // --------------------
 // 1. downloadInvoices(): MAIN function which controls the application flow
-// 1.1. pf_getInvoiceListPayer()
-// 1.2. parseInvoiceListPayer() => 'invoices' array
-// 1.3. createDir(): While Array 'invoices' has entries
-// 1.4. pf_getInvoicePayer(): While Array 'invoices' has entries
-// 1.5. parseInvoicePayerResponse(): While Array 'invoices' has entries
+// 2. pf_getInvoiceListPayer()
+// 3. parseInvoiceListPayer() => 'invoices' array
+// 4. pf_getInvoicePayer(): While Array 'invoices' has entries
+// 5. parseInvoicePayerResponse(): While Array 'invoices' has entries
+// 6. createZipArchive(): While Array 'invoices' has entries if CONFIG.create_zip_file is true
 //*****************************************************************************
 
 //*****************************************************************************
@@ -43,6 +43,7 @@ const fs = require('fs');
 const util = require('util');
 const xml2js = require('xml2js');
 const parseString = xml2js.parseString;
+const AdmZip = require("adm-zip");
 
 //*****************************************************************************
 // Load custom modules
@@ -134,7 +135,7 @@ async function downloadInvoices(archive_data) {
 
     while (invoices.length > 0) {
         let invoice = invoices.shift();
-        invoice = createDir(invoice); // this makes it clear that 'invoice' might be changed
+        fs.mkdirSync(CONFIG.dir_downloads + '/' + invoice.FileName);
         try {
             // waiting for async functions
             let res = await pf_ws.pf_getInvoicePayer(CONFIG.pf_user, CONFIG.pf_pw, CONFIG.pf_eBillAccountID, invoice.BillerID, invoice.TransactionID, invoice.FileType, CONFIG.pf_url, CONFIG.pf_cert_reject_unauthorized, pf_cert);
@@ -142,6 +143,10 @@ async function downloadInvoices(archive_data) {
             if (CONFIG.write_ws_response) {
                 const output_filename = CONFIG.dir_downloads + '/ws_response_InvoicePayer_' + invoice.BillerID + '_' + invoice.TransactionID + '_' + invoice.FileType + '.XML';
                 await writeFile(output_filename, res.response); // Write response XML to local file
+            }
+            if (CONFIG.create_zip_file) {
+                await createZipArchive(invoice);
+                fs.rmSync(CONFIG.dir_downloads + '/' + invoice.FileName, { recursive: true, force: true });
             }
         } catch (e) {
             console.error(e);
@@ -159,6 +164,7 @@ async function parseInvoiceListPayer(response) {
     console.log('INFO: parseInvoiceListPayer');
     let parsed_res = await parseXML(response);
     let invoices = [];
+    const datetime = new Date().toISOString().replace(/[^a-z0-9]/gi,'').substring(0,15);
     const invoiceReports = parsed_res['s:Envelope']['s:Body'][0]['GetInvoiceListPayerResponse'][0]['GetInvoiceListPayerResult'][0]['b:InvoiceReport'];
     for (let i = 0 ; i< invoiceReports.length ; i++ ) {
         let invoice = {
@@ -167,7 +173,7 @@ async function parseInvoiceListPayer(response) {
             DeliveryDate: invoiceReports[i]['b:DeliveryDate'][0],
             FileType: invoiceReports[i]['b:FileType'][0]
         };
-        invoice.FileName = invoice.BillerID + '_' + invoice.TransactionID;
+        invoice.FileName = invoice.BillerID + '_' + invoice.TransactionID + '_' + datetime;
         // RGXMLSIG is the only FileType we need to download because it contains all the relevant data
         if (invoice.FileType === 'RGXMLSIG') {
             // only add invoice to invoices array if it has a DeliveryDate older than x hours
@@ -182,23 +188,6 @@ async function parseInvoiceListPayer(response) {
     }
     console.log(invoices);
     return invoices;
-}
-
-/**
- * Creates the directory for the 'invoice'-object. If the directory already
- * exists, the datetime is appended and FileName-attribute is changed.
- * @param   invoice     JS-object
- * @return  invoice     JS-object
- */
-function createDir(invoice) {
-    let invoice_dir = CONFIG.dir_downloads + '/' + invoice.FileName;
-    if ( fs.existsSync(invoice_dir) ) {
-        let datetime = new Date().toISOString().replace(/[^a-z0-9]/gi,'').substring(0,15);
-        invoice.FileName = invoice.FileName + '_' + datetime;
-        invoice_dir = CONFIG.dir_downloads + '/' + invoice.FileName;
-    }
-    fs.mkdirSync(invoice_dir);
-    return invoice;
 }
 
 /**
@@ -250,6 +239,22 @@ async function parseInvoicePayerResponse(invoice, response) {
         }
     }
     return invoice;
+}
+
+/**
+ * Creates a zip-file for every invoice-directory
+ * @param   invoice     JS-object
+ */
+async function createZipArchive(invoice) {
+  try {
+    const zip = new AdmZip();
+    const outputFile = CONFIG.dir_downloads + '/' + invoice.FileName + ".zip";
+    zip.addLocalFolder(CONFIG.dir_downloads + '/' + invoice.FileName);
+    zip.writeZip(outputFile);
+    console.log(`INFO: Zip ${outputFile} created.`);
+  } catch (e) {
+    console.log(`ERROR: Zip ${e}`);
+  }
 }
 
 /**

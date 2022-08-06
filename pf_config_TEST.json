@@ -7,6 +7,7 @@
     "pf_url": "https://ebill-ki.postfinance.ch/B2BService/B2BService.svc",
     "pf_archive_data": true,
     "write_ws_response": false,
+    "create_zip_file": true,
     "delivery_date_delay_in_hours": 360,
     "convert_biller_id": true,
     "biller_id_mapping_path": "biller_id_list.csv",

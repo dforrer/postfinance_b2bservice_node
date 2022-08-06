@@ -32,6 +32,6 @@ Function invocation
 1. downloadInvoices(): MAIN function which controls the application flow
 2. pf_getInvoiceListPayer()
 3. parseInvoiceListPayer() => 'invoices' array
-4. createDir(): While Array 'invoices' has entries
-5. pf_getInvoicePayer(): While Array 'invoices' has entries
-6. parseInvoicePayerResponse(): While Array 'invoices' has entries
+4. pf_getInvoicePayer(): While Array 'invoices' has entries
+5. parseInvoicePayerResponse(): While Array 'invoices' has entries
+6. createZipArchive(): While Array 'invoices' has entries if CONFIG.create_zip_file is true
