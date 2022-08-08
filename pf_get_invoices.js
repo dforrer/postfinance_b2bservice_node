@@ -135,6 +135,8 @@ async function downloadInvoices(archive_data) {
 
     while (invoices.length > 0) {
         let invoice = invoices.shift();
+        // avoids a problem where two invoices from the same supplier have the same reference
+        invoice.FileName = invoice.FileName + '_' + invoices.length;
         fs.mkdirSync(CONFIG.dir_downloads + '/' + invoice.FileName);
         try {
             // waiting for async functions
