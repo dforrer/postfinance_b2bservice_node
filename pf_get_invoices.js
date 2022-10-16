@@ -133,6 +133,10 @@ async function downloadInvoices(archive_data) {
         return;
     }
 
+    if ( !CONFIG.download_invoices ) {
+        console.log('INFO: invoice download disabled')
+        return;
+    }
     while (invoices.length > 0) {
         let invoice = invoices.shift();
         // avoids a problem where two invoices from the same supplier have the same reference

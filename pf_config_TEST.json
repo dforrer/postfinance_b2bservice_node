@@ -8,6 +8,7 @@
     "pf_archive_data": true,
     "write_ws_response": false,
     "create_zip_file": true,
+    "download_invoices": true,
     "delivery_date_delay_in_hours": 360,
     "convert_biller_id": true,
     "biller_id_mapping_path": "biller_id_list.csv",
